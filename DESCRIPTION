@@ -9,6 +9,8 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Imports:
+    glmmTMB,
+    Matrix,
     stats
 URL: https://github.com/RobAckerman/apim
 BugReports: https://github.com/RobAckerman/apim/issues
