@@ -1,0 +1,12 @@
+Package: apim
+Title: Tools for Actor-Partner Interdependence Models
+Version: 0.1.0
+Authors@R: 
+    person("Robert", "Ackerman", email = "Robert.Ackerman@utdallas.edu", role = c("aut", "cre"))
+Description: Utilities for Actor-Partner Interdependence Models (APIM).
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 8.0.0
+Imports:
+    stats
