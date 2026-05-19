@@ -98,6 +98,7 @@
 #'              person_1 = "man", person_2 = "woman")
 #' }
 #' @importFrom stats pchisq formula update coef
+#' @export
 estimate_Rsq <- function(model_full        = NULL,
                          indistinguishable = TRUE,
                          deviance_null     = NULL,
