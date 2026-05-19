@@ -4,7 +4,8 @@
 # Two approaches depending on model specification:
 #
 #   dispformula = ~0 (no residual variance):
-#     Uses the numerical differentiation approach.
+#     Uses central-difference numerical differentiation of the REML
+#     variance function via constrained conditional refits.
 #
 #   Otherwise (residual variance estimated):
 #     Routes to glmmTMB's built-in Satterthwaite df via
@@ -94,7 +95,7 @@
       else ""
     ))
 
-  # -- Nuclear refit helper --------------------------------------------------
+  # -- Conditional refit helper --------------------------------------------------
   make_refit_fn <- function(model_obj, X_, Z_full_, gp_manual_, n_obs_) {
     function(t_new) {
       tmp_mod <- tryCatch(
