@@ -45,6 +45,7 @@
 #'                                      disting_variable = "ECGender_A")
 #' }
 #' @importFrom stats formula update as.formula
+#' @export
 switch_to_interact <- function(object = NULL, disting_variable = NULL) {
   # Function for gls objects
   if (!is.null(object) && inherits(object, "gls"))
@@ -171,6 +172,7 @@ switch_to_interact <- function(object = NULL, disting_variable = NULL) {
 #'                                  disting_level_2   = "woman")
 #' }
 #' @importFrom stats formula update as.formula
+#' @export
 switch_to_twoint <- function(object = NULL, disting_variable = NULL, disting_level_1 = NULL, disting_level_2 = NULL) {
   # Function for gls objects
   if (!is.null(object) && inherits(object, "gls"))
