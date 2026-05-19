@@ -269,6 +269,7 @@
 #' @importFrom Matrix Matrix Diagonal kronecker
 #' @importFrom stats vcov model.matrix pt logLik AIC BIC model.frame cov2cor update formula coef family symnum
 #' @importFrom utils capture.output
+#' @export
 summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
                                           verbose = FALSE) {
 
