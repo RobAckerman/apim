@@ -48,6 +48,7 @@
 #' }
 #' @importFrom stats pchisq
 #' @importFrom glmmTMB fixef
+#' @export
 deviance_diff_test <- function(model_r = NULL, model_f = NULL,
                                deviance_r = NULL, deviance_f = NULL,
                                p_r = NULL, p_f = NULL) {
