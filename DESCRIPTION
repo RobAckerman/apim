@@ -12,5 +12,6 @@ Imports:
     glmmTMB,
     Matrix,
     stats
+Remotes: RobAckerman/glmmTMB/glmmTMB
 URL: https://github.com/RobAckerman/apim
 BugReports: https://github.com/RobAckerman/apim/issues
