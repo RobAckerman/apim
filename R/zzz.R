@@ -1,6 +1,6 @@
 .onAttach <- function(libname, pkgname) {
   vc <- tryCatch(
-    getFromNamespace(".valid_covstruct", "glmmTMB"),
+    utils::getFromNamespace(".valid_covstruct", "glmmTMB"),
     error = function(e) NULL
   )
   if (is.null(vc) || !"indisting" %in% names(vc)) {
