@@ -31,15 +31,15 @@ df.resid.}
 \description{
 Produces a formatted summary for a fitted \code{glmmTMB} model using
 Satterthwaite degrees of freedom for fixed effects, styled after
-\code{lmerTest}'s summary output.
+\code{glmmTMB}'s summary output.
 
 Two paths are used depending on the model specification:
 
 \strong{dispformula = ~0 (no residual variance):}
 Full custom formatting -- family, formula, fit statistics, random effects,
 and a fixed effects table with 5 decimal places. Satterthwaite df are
-computed using a nuclear refit approach with a parallel central-difference
-Jacobian, validated against SAS PROC MIXED.
+computed using a numerical differentiation approach with a parallel central-difference
+Jacobian.
 
 \strong{Otherwise (residual variance estimated):}
 Prints everything from \code{glmmTMB}'s native summary (including residual
