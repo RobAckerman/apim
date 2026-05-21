@@ -1,3 +1,124 @@
+#' @keywords internal
+.satterthwaite_contrast <- function(model, L, eps = 1e-3,
+                                    n_cores = parallel::detectCores(logical = FALSE),
+                                    verbose = FALSE) {
+
+  coef_names <- names(fixef(model)$cond)
+
+  # build full contrast vector aligned to all fixed effects
+  L_full <- setNames(rep(0, length(coef_names)), coef_names)
+  for(nm in names(L)) {
+    if(!nm %in% coef_names)
+      stop("Contrast term '", nm, "' not found in model coefficients.")
+    L_full[nm] <- L[nm]
+  }
+  L_full <- as.numeric(L_full)
+
+  # extract model quantities
+  X         <- model.matrix(model)
+  Z_full    <- glmmTMB::getME(model, "Z")
+  theta_opt <- glmmTMB::getME(model, "theta")
+  n_obs     <- nrow(X)
+  p_theta   <- length(theta_opt)
+
+  re_struc  <- model$modelInfo$reStruc$cond
+  z_widths  <- vapply(re_struc, function(x) x$blockSize * x$blockReps, numeric(1))
+  gp_manual <- c(0L, cumsum(z_widths))
+
+  # asymptotic covariance of theta
+  V_full         <- vcov(model, full = TRUE)
+  nuisance_idx   <- grep("^theta", colnames(V_full))
+  Sigma_nuisance <- V_full[nuisance_idx, nuisance_idx, drop = FALSE]
+  Sigma_nuisance[is.na(Sigma_nuisance)] <- 0
+
+  n_cores <- max(1L, min(as.integer(n_cores), p_theta))
+
+  # refit function -- returns log variance of contrast L'beta
+  make_refit_fn <- function(model_obj, X_, Z_full_, gp_manual_, n_obs_, L_) {
+    function(t_new) {
+      tmp_mod <- tryCatch(
+        withCallingHandlers(
+          update(model_obj,
+                 start = list(theta = t_new),
+                 map   = list(theta = factor(rep(NA_integer_, length(t_new))))),
+          warning = function(w) invokeRestart("muffleWarning")
+        ),
+        error = function(e) stop("Refit failed: ", conditionMessage(e))
+      )
+
+      vc_new <- VarCorr(tmp_mod)$cond
+      V_tmp  <- Matrix::Matrix(0, n_obs_, n_obs_, sparse = TRUE)
+
+      for(i in seq_along(vc_new)) {
+        Sigma_i <- vc_new[[i]]
+        Z_i     <- Z_full_[, (gp_manual_[i] + 1L):gp_manual_[i + 1L], drop = FALSE]
+        n_grps  <- ncol(Z_i) / ncol(Sigma_i)
+        V_tmp   <- V_tmp +
+          Z_i %*% Matrix::kronecker(Matrix::Diagonal(n_grps), Sigma_i) %*% Matrix::t(Z_i)
+      }
+
+      diag_scale <- mean(Matrix::diag(V_tmp))
+      if(!is.finite(diag_scale) || diag_scale <= 0) diag_scale <- 1
+      V_tmp <- V_tmp + Matrix::Diagonal(n_obs_, diag_scale * 1e-8)
+
+      XtVinvX <- tryCatch(
+        as.matrix(Matrix::t(X_) %*% Matrix::solve(V_tmp, X_)),
+        error = function(e) stop("Sparse solve failed: ", conditionMessage(e))
+      )
+
+      var_contrast <- as.numeric(t(L_) %*% solve(XtVinvX) %*% L_)
+      log(var_contrast)
+    }
+  }
+
+  refit_fn <- make_refit_fn(model, X, Z_full, gp_manual, n_obs, L_full)
+  h        <- eps * pmax(abs(theta_opt), 1e-4)
+
+  # central difference Jacobian
+  if(n_cores == 1L) {
+    cols <- lapply(seq_len(p_theta), function(j) {
+      x_fwd <- theta_opt; x_fwd[j] <- theta_opt[j] + h[j]
+      x_bck <- theta_opt; x_bck[j] <- theta_opt[j] - h[j]
+      (refit_fn(x_fwd) - refit_fn(x_bck)) / (2 * h[j])
+    })
+  } else {
+    cl <- parallel::makeCluster(n_cores)
+    tryCatch({
+      parallel::clusterEvalQ(cl, { library(glmmTMB); library(Matrix) })
+      parallel::clusterExport(
+        cl,
+        c("model", "X", "Z_full", "gp_manual", "n_obs", "L_full",
+          "theta_opt", "h", "make_refit_fn"),
+        envir = environment()
+      )
+      parallel::clusterEvalQ(cl,
+        refit_fn <- make_refit_fn(model, X, Z_full, gp_manual, n_obs, L_full)
+      )
+      data_name <- tryCatch(as.character(model$call$data), error = function(e) NULL)
+      if(!is.null(data_name) && length(data_name) == 1 &&
+         exists(data_name, envir = .GlobalEnv))
+        parallel::clusterExport(cl, data_name, envir = .GlobalEnv)
+
+      cols <- parallel::parLapply(cl, seq_len(p_theta), function(j) {
+        x_fwd <- theta_opt; x_fwd[j] <- theta_opt[j] + h[j]
+        x_bck <- theta_opt; x_bck[j] <- theta_opt[j] - h[j]
+        (refit_fn(x_fwd) - refit_fn(x_bck)) / (2 * h[j])
+      })
+    }, finally = { parallel::stopCluster(cl) })
+  }
+
+  g_log <- as.numeric(unlist(cols))
+  v_den <- sum(g_log * (Sigma_nuisance %*% g_log))
+
+  if(v_den <= 0) {
+    warning("Non-positive df denominator -- check model convergence or increase 'eps'.")
+    return(Inf)
+  }
+
+  df <- 2 / v_den
+  if(verbose) cat("Satterthwaite df for contrast:", round(df, 3), "\n")
+  return(df)
+}
 # Internal function -- not exported
 # Satterthwaite degrees of freedom for fixed effects in a glmmTMB model.
 #
@@ -130,7 +251,10 @@
         as.matrix(Matrix::t(X_) %*% Matrix::solve(V_tmp, X_)),
         error = function(e) stop("Sparse solve failed: ", conditionMessage(e))
       )
-      log(diag(solve(XtVinvX)))
+df_vec <- sapply(coef_names, function(nm) {
+  L <- setNames(1, nm)
+  .satterthwaite_contrast(model, L, eps = eps, n_cores = n_cores, verbose = FALSE)
+})
     }
   }
 
@@ -216,8 +340,6 @@
 
   return(result)
 }
-
-
 #' Satterthwaite Summary for glmmTMB Models
 #'
 #' @description
