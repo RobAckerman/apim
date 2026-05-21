@@ -143,6 +143,7 @@
 #
 # Returns:
 #   data.frame with columns: Term, Estimate, SE, df, t, p
+#' @keywords internal
 .satterthwaite_glmmTMB_general <- function(model, eps = 1e-3,
                                            n_cores = parallel::detectCores(logical = FALSE),
                                            verbose = TRUE) {
@@ -215,8 +216,14 @@
         "\n  Note: runtime scales with length(theta)."
       else ""
     ))
-  coef_names <- names(fixef(model)$cond)  # explicit for R CMD check
-  # -- Conditional refit helper --------------------------------------------------
+
+  # -- Conditional refit helper ----------------------------------------------
+  # Uses single-pass Jacobian: log(diag(solve(X'V^-1 X)))
+  # Valid for unit-vector contrasts (main effects); fast because all terms
+  # are computed in a single refit pass. For non-unit contrasts (e.g. simple
+  # slopes), use .satterthwaite_contrast instead.
+  coef_names <- names(fixef(model)$cond)
+
   make_refit_fn <- function(model_obj, X_, Z_full_, gp_manual_, n_obs_) {
     function(t_new) {
       tmp_mod <- tryCatch(
@@ -251,10 +258,9 @@
         as.matrix(Matrix::t(X_) %*% Matrix::solve(V_tmp, X_)),
         error = function(e) stop("Sparse solve failed: ", conditionMessage(e))
       )
-df_vec <- sapply(coef_names, function(nm) {
-  L <- setNames(1, nm)
-  .satterthwaite_contrast(model, L, eps = eps, n_cores = n_cores, verbose = FALSE)
-})
+
+      # single-pass: log variance for each term (unit vector contrasts)
+      log(diag(solve(XtVinvX)))
     }
   }
 
@@ -324,8 +330,8 @@ df_vec <- sapply(coef_names, function(nm) {
 
   # -- Results ---------------------------------------------------------------
   result <- data.frame(
-    Term      = names(fixef(model)$cond),
-    Estimate  = fixef(model)$cond,
+    Term      = coef_names,
+    Estimate  = as.numeric(fixef(model)$cond),
     SE        = sqrt(diag(beta_vcov_orig)),
     df        = 2 / pmax(v_den_log, 1e-12),
     row.names = NULL
@@ -340,62 +346,18 @@ df_vec <- sapply(coef_names, function(nm) {
 
   return(result)
 }
-#' Satterthwaite Summary for glmmTMB Models
-#'
-#' @description
-#' Produces a formatted summary for a fitted \code{glmmTMB} model using
-#' Satterthwaite degrees of freedom for fixed effects, styled after
-#' \code{glmmTMB}'s summary output.
-#'
-#' Two paths are used depending on the model specification:
-#'
-#' \strong{dispformula = ~0 (no residual variance):}
-#' Full custom formatting -- family, formula, fit statistics, random effects,
-#' and a fixed effects table with 5 decimal places. Satterthwaite df are
-#' computed using a numerical differentiation approach with a parallel central-difference
-#' Jacobian.
-#'
-#' \strong{Otherwise (residual variance estimated):}
-#' Prints everything from \code{glmmTMB}'s native summary (including residual
-#' variance and dispersion estimate) but replaces the fixed effects table with
-#' the same 5 decimal place formatting using \code{glmmTMB}'s built-in
-#' Satterthwaite df.
-#'
-#' @param model A fitted \code{glmmTMB} model object.
-#' @param eps Numeric. Step size for central differences in the Jacobian.
-#'   Only used when \code{dispformula = ~0}. Default is \code{1e-3}.
-#' @param digits Integer. Number of digits for rounding in the coefficient
-#'   table. Default is \code{5}.
-#' @param verbose Logical. If \code{TRUE}, prints progress messages during
-#'   Jacobian computation. Default is \code{FALSE}.
-#'
-#' @return Invisibly returns a list with elements:
-#'   \describe{
-#'     \item{satterthwaite}{A data frame with columns Term, Estimate, SE, df,
-#'       t, and p from the Satterthwaite computation.}
-#'     \item{vc}{VarCorr output from the model.}
-#'     \item{fit_stats}{Named vector of AIC, BIC, logLik, -2*log(L), and
-#'       df.resid.}
-#'   }
-#'
-#' @examples
-#' \dontrun{
-#' m <- glmmTMB(RelSat_A ~ c_Amity_A * ECGender_A + c_Amity_P * ECGender_A +
-#'                cs(0 + man + woman | DyadID),
-#'              dispformula = ~0, REML = TRUE, data = pairwise_disting)
-#'
-#' summary_glmmTMB_satterthwaite(m)
-#' }
-#' @importFrom glmmTMB getME fixef VarCorr
-#' @importFrom Matrix Matrix Diagonal kronecker
-#' @importFrom stats vcov model.matrix pt logLik AIC BIC model.frame cov2cor update formula coef family symnum
-#' @importFrom utils capture.output
+
 #' @export
 summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
-                                          verbose = FALSE) {
-
+                                          alpha = 0.05, verbose = FALSE) {
   # -- Helper: format and print fixed effects table --------------------------
   print_coef_table <- function(sw) {
+
+    # compute CI bounds using Satterthwaite df
+    crit     <- qt(1 - alpha / 2, df = sw$df)
+    sw$lower <- sw$Estimate - crit * sw$SE
+    sw$upper <- sw$Estimate + crit * sw$SE
+
     p_fmt <- ifelse(
       sw$p < 5e-7,
       formatC(sw$p, format = "e", digits = 3),
@@ -410,20 +372,33 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
       symbols   = c("***", "**", "*", ".", " ")
     )
 
+    ci_label <- sprintf("%d%% CI", round((1 - alpha) * 100))
+
     print_df <- data.frame(
-      Estimate     = formatC(sw$Estimate, format = "f", digits = 5),
-      `Std. Error` = formatC(sw$SE,       format = "f", digits = 5),
-      `t value`    = formatC(sw$t,        format = "f", digits = 5),
-      ddf          = formatC(sw$df,       format = "f", digits = 3),
-      `Pr(>|t|)`   = p_fmt,
-      ` `          = as.character(stars),
-      check.names  = FALSE,
-      row.names    = sw$Term
+      Estimate            = formatC(sw$Estimate, format = "f", digits = 5),
+      `Std. Error`        = formatC(sw$SE,       format = "f", digits = 5),
+      `t value`           = formatC(sw$t,        format = "f", digits = 5),
+      ddf                 = formatC(sw$df,       format = "f", digits = 3),
+      `CI Lower`          = formatC(sw$lower,    format = "f", digits = 5),
+      `CI Upper`          = formatC(sw$upper,    format = "f", digits = 5),
+      `Pr(>|t|)`          = p_fmt,
+      ` `                 = as.character(stars),
+      check.names         = FALSE,
+      row.names           = sw$Term
     )
+
+    # rename CI columns to reflect alpha
+    names(print_df)[5] <- paste0(ci_label, " Lower")
+    names(print_df)[6] <- paste0(ci_label, " Upper")
 
     print(print_df)
     cat("---\n")
     cat("Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1\n")
+    cat(sprintf("Note: %s confidence intervals based on Satterthwaite df\n",
+                ci_label))
+
+    # return sw with CI columns added
+    sw
   }
 
   # -- 0. Satterthwaite df ---------------------------------------------------
@@ -435,24 +410,22 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
   # ==========================================================================
   # PATH A: Model without dispformula = ~0
   # ==========================================================================
-  if (has_resid_var) {
+  if(has_resid_var) {
 
     s_full   <- summary(model, ddf = "satterthwaite")
     full_out <- capture.output(print(s_full))
 
-    # Split at the second "Conditional model:" -- first is random effects,
-    # second is fixed effects which we replace with custom formatting
     coef_start <- grep("^Conditional model:", full_out)
-    if (length(coef_start) >= 2) {
+    if(length(coef_start) >= 2) {
       cat(paste(full_out[1:(coef_start[2] - 1)], collapse = "\n"), "\n")
-    } else if (length(coef_start) == 1) {
+    } else if(length(coef_start) == 1) {
       cat(paste(full_out[1:(coef_start[1] - 1)], collapse = "\n"), "\n")
     } else {
       cat(paste(full_out, collapse = "\n"), "\n")
     }
 
     cat("\nConditional model:\n")
-    print_coef_table(sw)
+    sw <- print_coef_table(sw)
 
     invisible(list(
       satterthwaite = sw,
@@ -466,30 +439,32 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
     # PATH B: Model with dispformula = ~0
     # ==========================================================================
 
-    # -- 1. Family / formula / data header ----------------------------------
+    # -- 1. Family / formula / data header ------------------------------------
     fam     <- family(model)
     fam_str <- paste0("Family: ", fam$family, "  ( ", fam$link, " )")
 
-    raw_formula <- paste(deparse(formula(model), width.cutoff = 500L), collapse = " ")
-    data_name   <- tryCatch(deparse(model$call$data), error = function(e) "<unknown>")
+    raw_formula <- paste(deparse(formula(model), width.cutoff = 500L),
+                         collapse = " ")
+    data_name   <- tryCatch(deparse(model$call$data),
+                            error = function(e) "<unknown>")
 
     cat(fam_str, "\n")
     cat(paste0("Formula:          ", raw_formula), "\n")
     cat("Dispersion:              ~0\n")
     cat("Data:", data_name, "\n\n")
 
-    # -- 2. Fit statistics ---------------------------------------------------
+    # -- 2. Fit statistics ----------------------------------------------------
     ll      <- logLik(model)
     n_obs   <- nrow(model.frame(model))
     p_fixed <- length(fixef(model)$cond)
     df_res  <- n_obs - p_fixed
 
     fit_stats <- c(
-      AIC          = AIC(model),
-      BIC          = BIC(model),
-      logLik       = as.numeric(ll),
-      `-2*log(L)`  = -2 * as.numeric(ll),
-      df.resid     = df_res
+      AIC         = AIC(model),
+      BIC         = BIC(model),
+      logLik      = as.numeric(ll),
+      `-2*log(L)` = -2 * as.numeric(ll),
+      df.resid    = df_res
     )
 
     stat_names <- names(fit_stats)
@@ -498,12 +473,12 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
 
     name_line <- paste(mapply(function(nm, w) formatC(nm, width = w, flag = " "),
                               stat_names, col_widths), collapse = " ")
-    val_line  <- paste(mapply(function(v,  w) formatC(v,  width = w, flag = " "),
-                              stat_vals,  col_widths), collapse = " ")
+    val_line  <- paste(mapply(function(v, w)  formatC(v,  width = w, flag = " "),
+                              stat_vals, col_widths), collapse = " ")
     cat(name_line, "\n")
     cat(val_line,  "\n\n")
 
-    # -- 3. Random effects ---------------------------------------------------
+    # -- 3. Random effects ----------------------------------------------------
     cat("Random effects:\n\n")
     cat("Conditional model:\n")
 
@@ -518,22 +493,22 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
       vars  <- diag(Sig)
       sds   <- sqrt(vars)
 
-      corr_mat <- if (n_par > 1L) cov2cor(Sig) else matrix(1)
+      corr_mat <- if(n_par > 1L) cov2cor(Sig) else matrix(1)
 
       struc_entry <- re_struc[[grp]]
-      cov_type    <- if (!is.null(struc_entry$covtype)) {
+      cov_type    <- if(!is.null(struc_entry$covtype)) {
         tolower(as.character(struc_entry$covtype))
       } else "us"
       is_cs <- cov_type %in% c("cs", "hcs", "homcs")
 
       corr_strs <- character(n_par)
-      if (n_par > 1L) {
-        if (is_cs) {
+      if(n_par > 1L) {
+        if(is_cs) {
           corr_strs[2L] <- paste0(
             formatC(corr_mat[2L, 1L], format = "f", digits = 3), " (cs)"
           )
         } else {
-          for (i in 2L:n_par) {
+          for(i in 2L:n_par) {
             vals <- corr_mat[i, 1L:(i - 1L)]
             corr_strs[i] <- paste(
               formatC(vals, format = "f", digits = 3), collapse = "  "
@@ -554,16 +529,17 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
 
     re_df <- do.call(rbind, re_rows)
 
-    corr_width   <- 7L
-    corr_tokens  <- strsplit(trimws(re_df$Corr), "\\s+")
-    plain_tokens <- lapply(corr_tokens, function(x) x[!grepl("\\(cs\\)", x)])
-    max_corrs    <- max(lengths(plain_tokens))
+    corr_width  <- 7L
+    corr_tokens <- strsplit(trimws(re_df$Corr), "\\s+")
+    plain_tokens <- lapply(corr_tokens,
+                           function(x) x[!grepl("\\(cs\\)", x)])
+    max_corrs <- max(lengths(plain_tokens))
 
     re_df$Corr <- sapply(seq_len(nrow(re_df)), function(i) {
       raw    <- re_df$Corr[i]
-      cs_tag <- if (grepl("\\(cs\\)", raw)) " (cs)" else ""
+      cs_tag <- if(grepl("\\(cs\\)", raw)) " (cs)" else ""
       toks   <- plain_tokens[[i]]
-      if (length(toks) == 0L || all(toks == "")) {
+      if(length(toks) == 0L || all(toks == "")) {
         return(strrep(" ", corr_width * max_corrs))
       }
       padded   <- formatC(toks, width = corr_width, flag = " ")
@@ -571,7 +547,6 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
       paste0(paste(padded, collapse = ""), trailing, cs_tag)
     })
 
-    # Build table manually with leading space to match native glmmTMB style
     w_groups <- max(nchar(c("Groups",   re_df$Groups)))   + 1L
     w_name   <- max(nchar(c("Name",     re_df$Name)))     + 1L
     w_var    <- max(nchar(c("Variance", re_df$Variance))) + 1L
@@ -587,8 +562,8 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
     )
     cat(header, "\n")
 
-    for (i in seq_len(nrow(re_df))) {
-      corr_str <- if (nchar(trimws(re_df$Corr[i])) > 0) re_df$Corr[i] else ""
+    for(i in seq_len(nrow(re_df))) {
+      corr_str <- if(nchar(trimws(re_df$Corr[i])) > 0) re_df$Corr[i] else ""
       row <- paste0(
         " ",
         formatC(re_df$Groups[i],   width = w_groups, flag = "-"),
@@ -600,29 +575,29 @@ summary_glmmTMB_satterthwaite <- function(model, eps = 1e-3, digits = 5,
       cat(row, "\n")
     }
 
-    # -- Number of obs / groups ----------------------------------------------
+    # -- Number of obs / groups -----------------------------------------------
     mf <- model.frame(model)
     n_grps <- sapply(grp_names, function(g) {
-      if (g %in% names(mf)) {
+      if(g %in% names(mf)) {
         length(unique(mf[[g]]))
-      } else if (grepl(":", g)) {
+      } else if(grepl(":", g)) {
         parts <- strsplit(g, ":")[[1]]
-        if (all(parts %in% names(mf))) {
+        if(all(parts %in% names(mf))) {
           length(unique(interaction(mf[parts], drop = TRUE)))
         } else NA_integer_
       } else NA_integer_
     })
 
     grp_parts <- mapply(
-      function(g, n) if (!is.na(n)) paste0(g, ", ", n) else g,
+      function(g, n) if(!is.na(n)) paste0(g, ", ", n) else g,
       grp_names, n_grps
     )
     cat(sprintf("\nNumber of obs: %d, groups:  %s\n", n_obs,
                 paste(grp_parts, collapse = ";  ")))
 
-    # -- 4. Fixed effects ----------------------------------------------------
+    # -- 4. Fixed effects -----------------------------------------------------
     cat("\nConditional model:\n")
-    print_coef_table(sw)
+    sw <- print_coef_table(sw)
 
     invisible(list(
       satterthwaite = sw,
