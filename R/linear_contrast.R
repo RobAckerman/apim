@@ -25,8 +25,17 @@
 
 #' @keywords internal
 .find_int_term <- function(coef_names, pred, modx) {
-  hits <- coef_names[grepl(pred,  coef_names, fixed = TRUE) &
-                       grepl(modx, coef_names, fixed = TRUE)]
+  # split pred in case it contains colons (e.g. "man:c_Amity_P")
+  pred_parts <- strsplit(pred, ":", fixed = TRUE)[[1]]
+  modx_parts <- strsplit(modx, ":", fixed = TRUE)[[1]]
+  all_parts  <- c(pred_parts, modx_parts)
+
+  # find terms that contain all parts
+  hits <- coef_names[sapply(coef_names, function(term) {
+    term_parts <- strsplit(term, ":", fixed = TRUE)[[1]]
+    all(all_parts %in% term_parts) && length(term_parts) == length(all_parts)
+  })]
+
   if(length(hits) == 0)
     stop("No interaction term found for '", pred, "' and '", modx, "'.")
   hits[1]
