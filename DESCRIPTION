@@ -11,6 +11,8 @@ RoxygenNote: 8.0.0
 Imports:
     glmmTMB,
     Matrix,
+    nlme,
+    parallel,
     stats
 Remotes: RobAckerman/glmmTMB/glmmTMB
 URL: https://github.com/RobAckerman/apim
