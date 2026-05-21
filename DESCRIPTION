@@ -1,5 +1,5 @@
 Package: apim
-Title: Tools for Actor-Partner Interdependence Models
+Title: Actor-Partner Interdependence Model Convenience Functions
 Version: 0.1.0
 Authors@R: 
     person("Robert", "Ackerman", email = "Robert.Ackerman@utdallas.edu", role = c("aut", "cre"))

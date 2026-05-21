@@ -1,23 +1,35 @@
 **apim**
 apim is an R package providing convenience functions for the Actor-Partner Interdependence Model (APIM).
 
-**Installation**
-This package requires a patched version of glmmTMB that adds the
-indisting() covariance structure for indistinguishable dyads. Please
-install from RobAckerman/glmmTMB rather than the CRAN version of
-glmmTMB.
+## Installation
+
+### Recommended (fast, no compilation required)
 
 ```r
-# Step 1: Install remotes if not already installed
+install.packages("apim", repos = "https://robackerman.r-universe.dev")
+```
+
+> **Note:** This installs a patched version of `glmmTMB` that adds the
+> `indisting()` covariance structure for indistinguishable dyads. This
+> replaces the CRAN version of `glmmTMB` on your machine. The patched
+> version is fully backward compatible — all existing `glmmTMB`
+> functionality is preserved.
+
+### If you do not want to replace your glmmTMB installation
+
+Install from GitHub without the r-universe repo. You will still need to
+install the patched `glmmTMB` separately if you want to use `indisting()`,
+but all other `apim` functions will work with the CRAN version of `glmmTMB`.
+
+```r
 install.packages("remotes")
+remotes::install_github("RobAckerman/apim", dependencies = FALSE)
+```
 
-# Step 2: Install patched glmmTMB with indisting() support
-remotes::install_github("RobAckerman/glmmTMB", subdir = "glmmTMB")
+### Load the packages
 
-# Step 3: Install apim from GitHub
-remotes::install_github("RobAckerman/apim")
-
-# Step 4: Load the packages
+```r
 library(glmmTMB)
 library(apim)
+```
 ```

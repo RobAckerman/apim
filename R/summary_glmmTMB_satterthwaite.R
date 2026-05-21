@@ -1,5 +1,4 @@
 #' @keywords internal
-#' @importFrom stats setNames
 .satterthwaite_contrast <- function(model, L, eps = 1e-3,
                                     n_cores = parallel::detectCores(logical = FALSE),
                                     verbose = FALSE) {
@@ -93,7 +92,7 @@
         envir = environment()
       )
       parallel::clusterEvalQ(cl,
-                             refit_fn <- make_refit_fn(model, X, Z_full, gp_manual, n_obs, L_full)
+        refit_fn <- make_refit_fn(model, X, Z_full, gp_manual, n_obs, L_full)
       )
       data_name <- tryCatch(as.character(model$call$data), error = function(e) NULL)
       if(!is.null(data_name) && length(data_name) == 1 &&
@@ -252,10 +251,10 @@
         as.matrix(Matrix::t(X_) %*% Matrix::solve(V_tmp, X_)),
         error = function(e) stop("Sparse solve failed: ", conditionMessage(e))
       )
-      df_vec <- sapply(coef_names, function(nm) {
-        L <- setNames(1, nm)
-        .satterthwaite_contrast(model, L, eps = eps, n_cores = n_cores, verbose = FALSE)
-      })
+df_vec <- sapply(coef_names, function(nm) {
+  L <- setNames(1, nm)
+  .satterthwaite_contrast(model, L, eps = eps, n_cores = n_cores, verbose = FALSE)
+})
     }
   }
 
