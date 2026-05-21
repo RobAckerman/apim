@@ -13,9 +13,10 @@ switch_to_twoint(
 }
 \arguments{
 \item{object}{A fitted \code{gls} or \code{glmmTMB} model object specified
-using the two-intercept approach.}
+using the interaction approach.}
 
-\item{disting_variable}{Character. Name of the effect-coded distinguishing}
+\item{disting_variable}{Character. Name of the effect-coded distinguishing
+variable (e.g. \code{"ECGender_A"}).}
 
 \item{disting_level_1}{Character. Name of the dummy-coded variable for the
 first dyad member in the dataset (e.g. \code{"man"}).}

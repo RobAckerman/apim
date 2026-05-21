@@ -10,7 +10,8 @@ switch_to_interact(object = NULL, disting_variable = NULL)
 \item{object}{A fitted \code{gls} or \code{glmmTMB} model object specified
 using the two-intercept approach.}
 
-\item{disting_variable}{Character. Name of the effect-coded distinguishing}
+\item{disting_variable}{Character. Name of the effect-coded distinguishing
+variable (e.g. \code{"ECGender_A"}).}
 }
 \value{
 A fitted model object of the same class as \code{object},
