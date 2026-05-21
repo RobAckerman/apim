@@ -215,7 +215,7 @@
         "\n  Note: runtime scales with length(theta)."
       else ""
     ))
-
+  coef_names <- names(fixef(model)$cond)  # explicit for R CMD check
   # -- Conditional refit helper --------------------------------------------------
   make_refit_fn <- function(model_obj, X_, Z_full_, gp_manual_, n_obs_) {
     function(t_new) {
