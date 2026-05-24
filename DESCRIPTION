@@ -1,6 +1,6 @@
 Package: apim
 Title: Actor-Partner Interdependence Model Convenience Functions
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: 
     person("Robert", "Ackerman", email = "Robert.Ackerman@utdallas.edu", role = c("aut", "cre"))
 Description: Utilities for Actor-Partner Interdependence Models (APIM).
@@ -9,10 +9,16 @@ Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 Imports:
+    dplyr,
+    ggplot2,
     glmmTMB,
     Matrix,
     parallel,
-    stats
+    plotly,
+    stats,
+    tidyr
 Remotes: RobAckerman/glmmTMB/glmmTMB
 URL: https://github.com/RobAckerman/apim
 BugReports: https://github.com/RobAckerman/apim/issues
+Depends: 
+    R (>= 4.1.0)
