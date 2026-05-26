@@ -32,7 +32,7 @@ For \code{gls} models, non-formula arguments (\code{correlation},
 }
 \examples{
 \dontrun{
-# gls
+# gls with dummy codes
 m_twoint <- gls(RelSat_A ~ 0 + man + woman +
                             man:c_Amity_A + woman:c_Amity_A +
                             man:c_Amity_P + woman:c_Amity_P,
@@ -40,8 +40,19 @@ m_twoint <- gls(RelSat_A ~ 0 + man + woman +
                 weights     = varIdent(form = ~1 | ECGender_A),
                 data        = pairwise_disting)
 
-m_interact <- switch_to_interact(object         = m_twoint,
+m_interact <- switch_to_interact(object           = m_twoint,
                                  disting_variable = "ECGender_A")
+
+# gls with as.factor() distinguishing variable
+m_twoint_f <- gls(RelSat_A ~ 0 + as.factor(ECGender_A) +
+                              as.factor(ECGender_A):c_Amity_A +
+                              as.factor(ECGender_A):c_Amity_P,
+                  correlation = corCompSymm(form = ~1 | DyadID),
+                  weights     = varIdent(form = ~1 | ECGender_A),
+                  data        = pairwise_disting)
+
+m_interact_f <- switch_to_interact(object           = m_twoint_f,
+                                   disting_variable = "ECGender_A")
 
 # glmmTMB
 m_twoint_tmb <- glmmTMB(RelSat_A ~ 0 + man + woman +

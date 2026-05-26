@@ -23,7 +23,7 @@
 #'
 #' @examples
 #' \dontrun{
-#' # gls
+#' # gls with dummy codes
 #' m_twoint <- gls(RelSat_A ~ 0 + man + woman +
 #'                             man:c_Amity_A + woman:c_Amity_A +
 #'                             man:c_Amity_P + woman:c_Amity_P,
@@ -31,8 +31,19 @@
 #'                 weights     = varIdent(form = ~1 | ECGender_A),
 #'                 data        = pairwise_disting)
 #'
-#' m_interact <- switch_to_interact(object         = m_twoint,
+#' m_interact <- switch_to_interact(object           = m_twoint,
 #'                                  disting_variable = "ECGender_A")
+#'
+#' # gls with as.factor() distinguishing variable
+#' m_twoint_f <- gls(RelSat_A ~ 0 + as.factor(ECGender_A) +
+#'                               as.factor(ECGender_A):c_Amity_A +
+#'                               as.factor(ECGender_A):c_Amity_P,
+#'                   correlation = corCompSymm(form = ~1 | DyadID),
+#'                   weights     = varIdent(form = ~1 | ECGender_A),
+#'                   data        = pairwise_disting)
+#'
+#' m_interact_f <- switch_to_interact(object           = m_twoint_f,
+#'                                    disting_variable = "ECGender_A")
 #'
 #' # glmmTMB
 #' m_twoint_tmb <- glmmTMB(RelSat_A ~ 0 + man + woman +
@@ -49,37 +60,109 @@
 #' @export
 switch_to_interact <- function(object = NULL, disting_variable = NULL) {
 
+  # ---------------------------------------------------------------------------
+  # Helper: extract predictor names from interaction terms robustly.
+  # Handles three cases:
+  #   1. Effect-coded: ECGender_A*c_Amity_A  -> terms contain disting_variable
+  #   2. as.factor():  as.factor(ECGender_A):c_Amity_A -> terms contain disting_variable
+  #   3. Dummy codes:  man:c_Amity_A or c_Amity_A:man -> neither part is disting_variable
+  #      In this case, person codes are identified as terms without ":"
+  # ---------------------------------------------------------------------------
+  .get_predictors <- function(all_terms, disting_variable) {
+    vars_with_colon <- all_terms[grepl(":", all_terms)]
+    if (length(vars_with_colon) == 0) return(character(0))
+
+    has_disting <- any(grepl(disting_variable, vars_with_colon, fixed = TRUE))
+
+    if (has_disting) {
+      # effect-coded or as.factor() model
+      # keep the part of each interaction that does NOT contain disting_variable
+      preds <- unique(sapply(vars_with_colon, function(term) {
+        parts       <- strsplit(term, ":")[[1]]
+        non_disting <- parts[!grepl(disting_variable, parts, fixed = TRUE)]
+        if (length(non_disting) == 1) non_disting else NA_character_
+      }))
+    } else {
+      # dummy-code two-intercept model
+      # person codes = terms without ":" (pure intercept terms e.g. man, woman)
+      person_codes <- all_terms[!grepl(":", all_terms)]
+
+      # keep the part of each interaction that is NOT a person code
+      preds <- unique(sapply(vars_with_colon, function(term) {
+        parts      <- strsplit(term, ":")[[1]]
+        non_person <- parts[!parts %in% person_codes]
+        if (length(non_person) == 1) non_person else NA_character_
+      }))
+    }
+
+    preds[!is.na(preds)]
+  }
+
+  # ---------------------------------------------------------------------------
+  # Helper: extract RE string using bracket-matching — robust to RE term
+  # appearing anywhere in the formula.
+  # ---------------------------------------------------------------------------
+  .get_re_string <- function(object) {
+    formula_string <- gsub("\\s+", " ",
+                           paste(deparse(formula(object)), collapse = " "))
+    rhs      <- trimws(sub("^[^~]*~\\s*", "", formula_string))
+    pipe_pos <- regexpr("\\|", rhs)
+    if (pipe_pos == -1) return("")
+    chars <- strsplit(rhs, "")[[1]]
+
+    depth <- 0
+    left  <- pipe_pos
+    for (i in pipe_pos:1) {
+      if (chars[i] == ")") depth <- depth + 1
+      if (chars[i] == "(") {
+        if (depth == 0) { left <- i; break }
+        depth <- depth - 1
+      }
+    }
+    depth <- 0
+    right <- pipe_pos
+    for (i in pipe_pos:nchar(rhs)) {
+      if (chars[i] == "(") depth <- depth + 1
+      if (chars[i] == ")") {
+        if (depth == 0) { right <- i; break }
+        depth <- depth - 1
+      }
+    }
+    func_start <- left
+    for (i in (left - 1):1) {
+      if (grepl("[a-zA-Z0-9_\\.]", chars[i])) {
+        func_start <- i
+      } else {
+        break
+      }
+    }
+    trimws(substr(rhs, func_start, right))
+  }
+
   # -- gls -------------------------------------------------------------------
   if (!is.null(object) && inherits(object, "gls")) {
     fixeff_formula <- formula(object, fixed.only = TRUE)
     outcome_var    <- as.character(fixeff_formula[2])
+    all_terms      <- attr(terms(fixeff_formula), "term.labels")
 
-    # use term.labels to capture interaction terms
-    all_terms    <- attr(terms(fixeff_formula), "term.labels")
-    omit_pattern <- paste(c(disting_variable, outcome_var, "\\|"), collapse = "|")
-    vars_levels  <- all_terms[!grepl(omit_pattern, all_terms)]
-
-    # remove the dummy intercept terms (man, woman) -- they contain no ":"
-    # and match the level names exactly
-    vars_predictor <- vars_levels[grepl(":", vars_levels)]
-
-    # strip the dummy variable prefix (e.g. "man:c_Amity_A" -> "c_Amity_A")
-    vars_predictor <- unique(gsub("^[^:]+:", "", vars_predictor))
-
-    newpredictorlist  <- paste0(disting_variable, "*", vars_predictor)
+    vars_predictor      <- .get_predictors(all_terms, disting_variable)
+    newpredictorlist    <- paste0(disting_variable, "*", vars_predictor)
     interaction_formula <- paste(newpredictorlist, collapse = " + ")
-    updatedmodel <- update(object, paste(outcome_var, " ~ ", interaction_formula))
 
-    oldmodel          <- suppressWarnings(update(object, method = "ML"))
-    oldmodelML_dev    <- -2 * summary(oldmodel)$logLik
-    newmodel          <- suppressWarnings(update(updatedmodel, method = "ML"))
-    newmodelML_dev    <- -2 * summary(newmodel)$logLik
+    updatedmodel <- update(object,
+                           paste(outcome_var, " ~ ", interaction_formula))
+
+    oldmodel       <- suppressWarnings(update(object, method = "ML"))
+    oldmodelML_dev <- -2 * summary(oldmodel)$logLik
+    newmodel       <- suppressWarnings(update(updatedmodel, method = "ML"))
+    newmodelML_dev <- -2 * summary(newmodel)$logLik
 
     if (round(oldmodelML_dev, 6) == round(newmodelML_dev, 6)) {
       return(updatedmodel)
     } else {
-      stop("The deviance values from both models run with ML estimation do not match.
-           There was a mistake. Please specify interaction approach on your own as you cannot trust these results.")
+      stop("The deviance values from both models run with ML estimation do ",
+           "not match. There was a mistake. Please specify the interaction ",
+           "approach on your own as you cannot trust these results.")
     }
   }
 
@@ -87,31 +170,16 @@ switch_to_interact <- function(object = NULL, disting_variable = NULL) {
   if (!is.null(object) && inherits(object, "glmmTMB")) {
     fixeff_formula <- formula(object, fixed.only = TRUE)
     outcome_var    <- as.character(fixeff_formula[2])
+    all_terms      <- attr(terms(fixeff_formula), "term.labels")
+    re_string      <- .get_re_string(object)
 
-    # use term.labels to capture interaction terms
-    all_terms    <- attr(terms(fixeff_formula), "term.labels")
-    omit_pattern <- paste(c(disting_variable, outcome_var, "\\|"), collapse = "|")
-    vars_levels  <- all_terms[!grepl(omit_pattern, all_terms)]
-
-    # keep only terms that contain ":" (interaction terms with dummy variables)
-    vars_with_colon <- vars_levels[grepl(":", vars_levels)]
-
-    # strip the dummy variable prefix to get predictor terms
-    vars_predictor <- unique(gsub("^[^:]+:", "", vars_with_colon))
-
+    vars_predictor      <- .get_predictors(all_terms, disting_variable)
     newpredictorlist    <- paste0(disting_variable, "*", vars_predictor)
     interaction_formula <- paste(newpredictorlist, collapse = " + ")
 
-    # extract random effects portion
-    formula_string <- gsub("\\s+", " ", paste(deparse(formula(object)), collapse = " "))
-    rhs            <- trimws(sub("^[^~]*~\\s*", "", formula_string))
-    fixeff_string  <- gsub("\\s+", " ", paste(deparse(formula(object, fixed.only = TRUE)), collapse = " "))
-    fixeff_rhs     <- trimws(sub("^[^~]*~\\s*", "", fixeff_string))
-    re_start       <- nchar(fixeff_rhs) + 1L
-    random_effect_term <- trimws(sub("^\\s*\\+\\s*", "", substr(rhs, re_start, nchar(rhs))))
-
-    newformula   <- paste0(outcome_var, " ~ ", interaction_formula, " + ", random_effect_term)
-    updatedmodel <- update(object, formula. = newformula)
+    newformula   <- paste0(outcome_var, " ~ ", interaction_formula,
+                           " + ", re_string)
+    updatedmodel <- update(object, formula. = as.formula(newformula))
 
     oldmodel       <- suppressWarnings(update(object, REML = FALSE))
     oldmodelML_dev <- -2 * summary(oldmodel)$logLik[1]
@@ -121,8 +189,9 @@ switch_to_interact <- function(object = NULL, disting_variable = NULL) {
     if (round(oldmodelML_dev, 6) == round(newmodelML_dev, 6)) {
       return(updatedmodel)
     } else {
-      stop("The deviance values from both models run with ML estimation do not match.
-           There was a mistake. Please specify interaction approach on your own as you cannot trust these results.")
+      stop("The deviance values from both models run with ML estimation do ",
+           "not match. There was a mistake. Please specify the interaction ",
+           "approach on your own as you cannot trust these results.")
     }
   }
 }
@@ -188,39 +257,109 @@ switch_to_interact <- function(object = NULL, disting_variable = NULL) {
 #' }
 #' @importFrom stats formula update as.formula terms
 #' @export
-switch_to_twoint <- function(object = NULL, disting_variable = NULL,
-                             disting_level_1 = NULL, disting_level_2 = NULL) {
+switch_to_twoint <- function(object           = NULL,
+                             disting_variable  = NULL,
+                             disting_level_1   = NULL,
+                             disting_level_2   = NULL) {
+
+  # ---------------------------------------------------------------------------
+  # Helper: extract predictor names from interaction terms robustly.
+  # ---------------------------------------------------------------------------
+  .get_predictors <- function(all_terms, disting_variable) {
+    vars_with_colon <- all_terms[grepl(":", all_terms)]
+    if (length(vars_with_colon) == 0) return(character(0))
+
+    has_disting <- any(grepl(disting_variable, vars_with_colon, fixed = TRUE))
+
+    if (has_disting) {
+      preds <- unique(sapply(vars_with_colon, function(term) {
+        parts       <- strsplit(term, ":")[[1]]
+        non_disting <- parts[!grepl(disting_variable, parts, fixed = TRUE)]
+        if (length(non_disting) == 1) non_disting else NA_character_
+      }))
+    } else {
+      person_codes <- all_terms[!grepl(":", all_terms)]
+      preds <- unique(sapply(vars_with_colon, function(term) {
+        parts      <- strsplit(term, ":")[[1]]
+        non_person <- parts[!parts %in% person_codes]
+        if (length(non_person) == 1) non_person else NA_character_
+      }))
+    }
+
+    preds[!is.na(preds)]
+  }
+
+  # ---------------------------------------------------------------------------
+  # Helper: extract RE string using bracket-matching.
+  # ---------------------------------------------------------------------------
+  .get_re_string <- function(object) {
+    formula_string <- gsub("\\s+", " ",
+                           paste(deparse(formula(object)), collapse = " "))
+    rhs      <- trimws(sub("^[^~]*~\\s*", "", formula_string))
+    pipe_pos <- regexpr("\\|", rhs)
+    if (pipe_pos == -1) return("")
+    chars <- strsplit(rhs, "")[[1]]
+
+    depth <- 0
+    left  <- pipe_pos
+    for (i in pipe_pos:1) {
+      if (chars[i] == ")") depth <- depth + 1
+      if (chars[i] == "(") {
+        if (depth == 0) { left <- i; break }
+        depth <- depth - 1
+      }
+    }
+    depth <- 0
+    right <- pipe_pos
+    for (i in pipe_pos:nchar(rhs)) {
+      if (chars[i] == "(") depth <- depth + 1
+      if (chars[i] == ")") {
+        if (depth == 0) { right <- i; break }
+        depth <- depth - 1
+      }
+    }
+    func_start <- left
+    for (i in (left - 1):1) {
+      if (grepl("[a-zA-Z0-9_\\.]", chars[i])) {
+        func_start <- i
+      } else {
+        break
+      }
+    }
+    trimws(substr(rhs, func_start, right))
+  }
 
   # -- gls -------------------------------------------------------------------
   if (!is.null(object) && inherits(object, "gls")) {
     fixeff_formula <- formula(object, fixed.only = TRUE)
     outcome_var    <- as.character(fixeff_formula[2])
+    all_terms      <- attr(terms(fixeff_formula), "term.labels")
 
-    # use term.labels to get all terms including interactions
-    all_terms    <- attr(terms(fixeff_formula), "term.labels")
-    omit_pattern <- paste(c(disting_variable, outcome_var, "\\|"), collapse = "|")
-    vars_levels  <- all_terms[!grepl(omit_pattern, all_terms)]
+    vars_predictor <- .get_predictors(all_terms, disting_variable)
 
-    new_interceptlist       <- paste0("0 + ", disting_level_1, " + ", disting_level_2)
-    new_level_1_predictorlist <- paste0(disting_level_1, ":", vars_levels)
-    new_level_2_predictorlist <- paste0(disting_level_2, ":", vars_levels)
-    twoint_formula_level_1  <- paste(new_level_1_predictorlist, collapse = " + ")
-    twoint_formula_level_2  <- paste(new_level_2_predictorlist, collapse = " + ")
-    twoint_formula          <- paste0(new_interceptlist, " + ",
-                                      twoint_formula_level_1, " + ",
-                                      twoint_formula_level_2)
+    new_interceptlist         <- paste0("0 + ", disting_level_1, " + ",
+                                        disting_level_2)
+    new_level_1_predictorlist <- paste0(disting_level_1, ":", vars_predictor)
+    new_level_2_predictorlist <- paste0(disting_level_2, ":", vars_predictor)
+    twoint_formula <- paste0(
+      new_interceptlist, " + ",
+      paste(new_level_1_predictorlist, collapse = " + "), " + ",
+      paste(new_level_2_predictorlist, collapse = " + ")
+    )
 
-    updatedmodel      <- update(object, paste(outcome_var, " ~ ", twoint_formula))
-    oldmodel          <- suppressWarnings(update(object, method = "ML"))
-    oldmodelML_dev    <- -2 * summary(oldmodel)$logLik
-    newmodel          <- suppressWarnings(update(updatedmodel, method = "ML"))
-    newmodelML_dev    <- -2 * summary(newmodel)$logLik
+    updatedmodel   <- update(object,
+                             paste(outcome_var, " ~ ", twoint_formula))
+    oldmodel       <- suppressWarnings(update(object, method = "ML"))
+    oldmodelML_dev <- -2 * summary(oldmodel)$logLik
+    newmodel       <- suppressWarnings(update(updatedmodel, method = "ML"))
+    newmodelML_dev <- -2 * summary(newmodel)$logLik
 
     if (round(oldmodelML_dev, 6) == round(newmodelML_dev, 6)) {
       return(updatedmodel)
     } else {
-      stop("The deviance values from both models run with ML estimation do not match.
-           There was a mistake. Please specify two-intercept approach on your own as you cannot trust these results.")
+      stop("The deviance values from both models run with ML estimation do ",
+           "not match. There was a mistake. Please specify the two-intercept ",
+           "approach on your own as you cannot trust these results.")
     }
   }
 
@@ -228,32 +367,24 @@ switch_to_twoint <- function(object = NULL, disting_variable = NULL,
   if (!is.null(object) && inherits(object, "glmmTMB")) {
     fixeff_formula <- formula(object, fixed.only = TRUE)
     outcome_var    <- as.character(fixeff_formula[2])
+    all_terms      <- attr(terms(fixeff_formula), "term.labels")
+    re_string      <- .get_re_string(object)
 
-    # use term.labels to get all terms including interactions
-    all_terms    <- attr(terms(fixeff_formula), "term.labels")
-    omit_pattern <- paste(c(disting_variable, outcome_var, "\\|"), collapse = "|")
-    vars_levels  <- all_terms[!grepl(omit_pattern, all_terms)]
+    vars_predictor <- .get_predictors(all_terms, disting_variable)
 
-    new_interceptlist         <- paste0("0 + ", disting_level_1, " + ", disting_level_2)
-    new_level_1_predictorlist <- paste0(disting_level_1, ":", vars_levels)
-    new_level_2_predictorlist <- paste0(disting_level_2, ":", vars_levels)
-    twoint_formula_level_1    <- paste(new_level_1_predictorlist, collapse = " + ")
-    twoint_formula_level_2    <- paste(new_level_2_predictorlist, collapse = " + ")
-    twoint_formula            <- paste0(new_interceptlist, " + ",
-                                        twoint_formula_level_1, " + ",
-                                        twoint_formula_level_2)
+    new_interceptlist         <- paste0("0 + ", disting_level_1, " + ",
+                                        disting_level_2)
+    new_level_1_predictorlist <- paste0(disting_level_1, ":", vars_predictor)
+    new_level_2_predictorlist <- paste0(disting_level_2, ":", vars_predictor)
+    twoint_formula <- paste0(
+      new_interceptlist, " + ",
+      paste(new_level_1_predictorlist, collapse = " + "), " + ",
+      paste(new_level_2_predictorlist, collapse = " + ")
+    )
 
-    # extract random effects portion
-    formula_string <- gsub("\\s+", " ", paste(deparse(formula(object)), collapse = " "))
-    rhs            <- trimws(sub("^[^~]*~\\s*", "", formula_string))
-    fixeff_string  <- gsub("\\s+", " ", paste(deparse(formula(object, fixed.only = TRUE)), collapse = " "))
-    fixeff_rhs     <- trimws(sub("^[^~]*~\\s*", "", fixeff_string))
-    re_start       <- nchar(fixeff_rhs) + 1L
-    random_effect_term <- trimws(sub("^\\s*\\+\\s*", "", substr(rhs, re_start, nchar(rhs))))
-
-    newformula_string <- paste0(outcome_var, " ~ ", twoint_formula, " + ", random_effect_term)
-    newformula        <- as.formula(newformula_string)
-    updatedmodel      <- update(object, formula. = newformula)
+    newformula   <- as.formula(paste0(outcome_var, " ~ ", twoint_formula,
+                                      " + ", re_string))
+    updatedmodel <- update(object, formula. = newformula)
 
     oldmodel       <- suppressWarnings(update(object, REML = FALSE))
     oldmodelML_dev <- -2 * summary(oldmodel)$logLik[1]
@@ -263,8 +394,9 @@ switch_to_twoint <- function(object = NULL, disting_variable = NULL,
     if (round(oldmodelML_dev, 6) == round(newmodelML_dev, 6)) {
       return(updatedmodel)
     } else {
-      stop("The deviance values from both models run with ML estimation do not match.
-           There was a mistake. Please specify two-intercept approach on your own as you cannot trust these results.")
+      stop("The deviance values from both models run with ML estimation do ",
+           "not match. There was a mistake. Please specify the two-intercept ",
+           "approach on your own as you cannot trust these results.")
     }
   }
 }

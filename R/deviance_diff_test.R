@@ -25,43 +25,43 @@
 #' @param p_f Integer. Number of parameters in the full model. Only required
 #'   when not supplying model objects.
 #'
-#' @return A named list with the following elements:
-#'   \describe{
-#'     \item{deviance_r}{Deviance for the reduced model.}
-#'     \item{deviance_f}{Deviance for the full model.}
-#'     \item{p_r}{Number of parameters in the reduced model.}
-#'     \item{p_f}{Number of parameters in the full model.}
-#'     \item{deviance_diff_test}{Chi-square statistic, degrees of freedom,
-#'       and p-value for the deviance difference test.}
-#'   }
+#' @return Invisibly returns a \code{data.frame} with columns \code{deviance_r},
+#'   \code{deviance_f}, \code{p_r}, \code{p_f}, \code{chi2}, \code{df},
+#'   and \code{p}.
 #'
 #' @examples
 #' \dontrun{
 #' # Using model objects
-#' result <- deviance_diff_test(model_r = m_reduced, model_f = m_full)
-#' result$deviance_diff_test
+#' deviance_diff_test(model_r = m_reduced, model_f = m_full)
 #'
 #' # Using raw values from other software
-#' result <- deviance_diff_test(deviance_r = 3689.3, deviance_f = 3674.1,
-#'                              p_r = 10, p_f = 12)
-#' result$deviance_diff_test
+#' deviance_diff_test(deviance_r = 3689.3, deviance_f = 3674.1,
+#'                    p_r = 10, p_f = 12)
 #' }
 #' @importFrom stats pchisq
 #' @importFrom glmmTMB fixef
 #' @export
-deviance_diff_test <- function(model_r = NULL, model_f = NULL,
-                               deviance_r = NULL, deviance_f = NULL,
-                               p_r = NULL, p_f = NULL) {
+deviance_diff_test <- function(model_r    = NULL,
+                               model_f    = NULL,
+                               deviance_r = NULL,
+                               deviance_f = NULL,
+                               p_r        = NULL,
+                               p_f        = NULL) {
 
   chisquare_symbol <- paste0("\u03C7", "\u00B2")
 
-  # Guard against mixing model objects and raw deviance values
+  # -- helper: format p-value ------------------------------------------------
+  fmt_p <- function(p) {
+    if (p < .0001) "< .0001" else sprintf("= %.4f", p)
+  }
+
+  # -- guard against mixing model objects and raw values ---------------------
   if (length(deviance_r) == 1 & length(deviance_f) == 1 &
       (!is.null(model_r) | !is.null(model_f)))
     stop("Because you provided model objects as arguments, you do not need to ",
          "provide values for deviances.", call. = FALSE)
 
-  # --- Raw deviance values supplied ---
+  # -- raw deviance values supplied ------------------------------------------
   if (length(deviance_r) == 1 & length(deviance_f) == 1) {
     deviance.reduced <- deviance_r
     deviance.full    <- deviance_f
@@ -76,9 +76,7 @@ deviance_diff_test <- function(model_r = NULL, model_f = NULL,
     df  <- p.full - p.reduced
   }
 
-  # --- Model objects supplied ---
-
-  # Guard against mixing model classes
+  # -- guard against mixing model classes ------------------------------------
   if (!is.null(model_r) && !is.null(model_f) &&
       inherits(model_r, "gls") && inherits(model_f, "glmmTMB"))
     stop("Both model_r and model_f must be estimated using the same package ",
@@ -89,31 +87,23 @@ deviance_diff_test <- function(model_r = NULL, model_f = NULL,
     stop("Both model_r and model_f must be estimated using the same package ",
          "(i.e., both gls or both glmmTMB).", call. = FALSE)
 
-  # --- gls objects ---
+  # -- gls objects -----------------------------------------------------------
   if (!is.null(model_r) && !is.null(model_f) &&
       inherits(model_r, "gls") && inherits(model_f, "gls")) {
 
     fixeff_difference <- model_f$dims$p - model_r$dims$p
 
     if (fixeff_difference != 0) {
-      # Fixed effects differ — both must be ML
       if (eval(model_r$method) == "REML" || eval(model_f$method) == "REML")
         stop("Both model_r and model_f must be estimated using Maximum ",
              "Likelihood when the number of fixed effects differs across ",
              "the models.", call. = FALSE)
-
-      deviance.reduced <- -2 * model_r$logLik
-      deviance.full    <- -2 * model_f$logLik
-      p.full           <- model_f$dims$p + nrow(model_f$apVar)
-      p.reduced        <- model_r$dims$p + nrow(model_r$apVar)
-
-    } else {
-      # Fixed effects same — REML acceptable
-      deviance.reduced <- -2 * model_r$logLik
-      deviance.full    <- -2 * model_f$logLik
-      p.full           <- model_f$dims$p + nrow(model_f$apVar)
-      p.reduced        <- model_r$dims$p + nrow(model_r$apVar)
     }
+
+    deviance.reduced <- -2 * model_r$logLik
+    deviance.full    <- -2 * model_f$logLik
+    p.full           <- model_f$dims$p + nrow(model_f$apVar)
+    p.reduced        <- model_r$dims$p + nrow(model_r$apVar)
 
     if (p.reduced >= p.full)
       stop("Number of parameters for full model must be greater than number ",
@@ -123,14 +113,14 @@ deviance_diff_test <- function(model_r = NULL, model_f = NULL,
     df  <- p.full - p.reduced
   }
 
-  # --- glmmTMB objects ---
+  # -- glmmTMB objects -------------------------------------------------------
   if (!is.null(model_r) && !is.null(model_f) &&
       inherits(model_r, "glmmTMB") && inherits(model_f, "glmmTMB")) {
 
-    fixeff_difference <- length(fixef(model_f)$cond) - length(fixef(model_r)$cond)
+    fixeff_difference <- length(fixef(model_f)$cond) -
+      length(fixef(model_r)$cond)
 
     if (fixeff_difference != 0) {
-      # Fixed effects differ — both must be ML
       if (isTRUE(eval(model_r$call$REML)) || isTRUE(eval(model_f$call$REML)))
         stop("Both model_r and model_f must be estimated using Maximum ",
              "Likelihood when the number of fixed effects differs across ",
@@ -142,8 +132,6 @@ deviance_diff_test <- function(model_r = NULL, model_f = NULL,
       p.reduced        <- length(model_r$obj$par)
 
     } else {
-      # Fixed effects same — REML acceptable; refit both with ML to get
-      # comparable deviances before computing the test.
       model_r_ml <- suppressWarnings(update(model_r, REML = FALSE))
       model_f_ml <- suppressWarnings(update(model_f, REML = FALSE))
 
@@ -163,20 +151,23 @@ deviance_diff_test <- function(model_r = NULL, model_f = NULL,
 
   pvalue <- pchisq(q = chi, df = df, lower.tail = FALSE)
 
-  text_results <- list(
-    deviance_r        = paste0("Deviance for Reduced Model = ",
-                                round(deviance.reduced, 3), "."),
-    deviance_f        = paste0("Deviance for Full Model = ",
-                                round(deviance.full, 3), "."),
-    p_r               = paste0("Number of Parameters in Reduced Model = ",
-                                p.reduced, "."),
-    p_f               = paste0("Number of Parameters in Full Model = ",
-                                p.full, "."),
-    deviance_diff_test = paste0("Deviance Difference Test: ",
-                                 chisquare_symbol, "(", df, ") = ",
-                                 round(chi, 3), ", p = ",
-                                 round(pvalue, 5), ".")
-  )
+  # -- print -----------------------------------------------------------------
+  cat("\n=== Deviance Difference Test ===\n\n")
+  cat(sprintf("  Deviance (reduced) : %.3f  (df = %d)\n",
+              deviance.reduced, p.reduced))
+  cat(sprintf("  Deviance (full)    : %.3f  (df = %d)\n",
+              deviance.full, p.full))
+  cat(sprintf("  %s(%d) = %.3f, p %s\n\n",
+              chisquare_symbol, df, chi, fmt_p(pvalue)))
 
-  return(text_results)
+  invisible(data.frame(
+    deviance_r = round(deviance.reduced, 3),
+    deviance_f = round(deviance.full,    3),
+    p_r        = p.reduced,
+    p_f        = p.full,
+    chi2       = round(chi,    3),
+    df         = df,
+    p          = round(pvalue, 5),
+    row.names  = NULL
+  ))
 }

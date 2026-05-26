@@ -34,15 +34,9 @@ required when not supplying model objects.}
 when not supplying model objects.}
 }
 \value{
-A named list with the following elements:
-\describe{
-\item{deviance_r}{Deviance for the reduced model.}
-\item{deviance_f}{Deviance for the full model.}
-\item{p_r}{Number of parameters in the reduced model.}
-\item{p_f}{Number of parameters in the full model.}
-\item{deviance_diff_test}{Chi-square statistic, degrees of freedom,
-and p-value for the deviance difference test.}
-}
+Invisibly returns a \code{data.frame} with columns \code{deviance_r},
+\code{deviance_f}, \code{p_r}, \code{p_f}, \code{chi2}, \code{df},
+and \code{p}.
 }
 \description{
 Computes and prints the chi-square statistic, degrees of freedom, and
@@ -58,12 +52,10 @@ differ only in their random effects, REML estimation is acceptable.
 \examples{
 \dontrun{
 # Using model objects
-result <- deviance_diff_test(model_r = m_reduced, model_f = m_full)
-result$deviance_diff_test
+deviance_diff_test(model_r = m_reduced, model_f = m_full)
 
 # Using raw values from other software
-result <- deviance_diff_test(deviance_r = 3689.3, deviance_f = 3674.1,
-                             p_r = 10, p_f = 12)
-result$deviance_diff_test
+deviance_diff_test(deviance_r = 3689.3, deviance_f = 3674.1,
+                   p_r = 10, p_f = 12)
 }
 }
