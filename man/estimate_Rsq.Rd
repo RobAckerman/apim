@@ -38,9 +38,8 @@ when not supplying model objects.}
 \item{deviance_full}{Numeric. ML deviance for the full model. Only required
 when not supplying model objects.}
 
-\item{deviance_p1}{Numeric. ML deviance for the person 1 model (i.e., the
-model containing only person 1's actor and partner effects). Only required
-for the distinguishable case when not supplying model objects.}
+\item{deviance_p1}{Numeric. ML deviance for the person 1 model. Only
+required for the distinguishable case when not supplying model objects.}
 
 \item{deviance_p2}{Numeric. ML deviance for the person 2 model. Only
 required for the distinguishable case when not supplying model objects.}
@@ -91,10 +90,10 @@ dyad member in the dataset (e.g. \code{"woman"}). Defaults to
 \code{"Person 2"}.}
 }
 \value{
-For the indistinguishable case, a character string reporting R-squared
-and the deviance difference test. For the distinguishable case, a list of
-three character strings: the omnibus test, and individual tests for
-person 1 and person 2.
+Invisibly returns a \code{data.frame} with columns \code{person},
+\code{R2}, \code{chi2}, \code{df}, and \code{p}. For the
+indistinguishable case the data frame has one row; for the distinguishable
+case it has three rows (omnibus, person 1, person 2).
 }
 \description{
 Reports the estimate(s) of R-squared and the corresponding deviance

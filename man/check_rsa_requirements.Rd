@@ -9,9 +9,10 @@ check_rsa_requirements(
   outcome,
   actor,
   partner,
+  re_term,
   moderator = NULL,
   mod_labels = NULL,
-  congruence_threshold = 0,
+  congruence_threshold = 0.5,
   min_pct = 10
 )
 }
@@ -24,39 +25,28 @@ check_rsa_requirements(
 
 \item{partner}{Character string. Name of the (centered) partner predictor.}
 
+\item{re_term}{Character string. The random effects term exactly as it
+should appear in the model formula, e.g.
+\code{"cs(0 + as.factor(ECGender_A) | DyadID)"}. Passed verbatim to
+\code{glmmTMB}.}
+
 \item{moderator}{Character string or \code{NULL}. Name of a grouping
-variable. When supplied, checks are run separately for each level in
-addition to the overall sample. Default \code{NULL}.}
+variable. When supplied, bias percentages are reported separately for
+each level. R-squared is always from the full sample. Default \code{NULL}.}
 
 \item{mod_labels}{Named character vector or \code{NULL}. Labels for
 moderator levels, e.g. \code{c("-1" = "Women", "1" = "Men")}.
 Default \code{NULL} uses raw moderator values as labels.}
 
-\item{congruence_threshold}{Numeric. Maximum absolute difference
-|Actor - Partner| for a case to be classified as congruent.
-Default \code{0} (exact equality required for congruence).}
+\item{congruence_threshold}{Numeric. Cutpoint applied to the standardized
+difference (partner_z - actor_z) for classifying cases as congruent.
+Default \code{0.5}, matching \code{RSA::summary.RSA}.}
 
 \item{min_pct}{Numeric. Minimum percentage of cases required in each
-bias category (over- and under-estimators) for the requirement to be
-met. Default \code{10}.}
+bias category. Default \code{10}.}
 }
 \value{
-Invisibly returns a \code{data.frame} with one row per group
-(overall plus any moderator levels) and columns:
-\describe{
-\item{Group}{Group label.}
-\item{N}{Sample size.}
-\item{SD_actor}{Standard deviation of actor scores.}
-\item{SD_partner}{Standard deviation of partner scores.}
-\item{r_actor_partner}{Correlation between actor and partner scores.}
-\item{R2}{R-squared from polynomial regression, with significance stars.}
-\item{Pct_under}{Percentage of under-estimators.}
-\item{Pct_congruent}{Percentage of congruent cases.}
-\item{Pct_over}{Percentage of over-estimators.}
-\item{Meets_bias_req}{Whether both bias categories meet \code{min_pct}.}
-\item{Meets_R2_req}{Whether the polynomial R-squared is significant.}
-\item{Meets_all}{Whether all requirements are met.}
-}
+Invisibly returns a \code{data.frame} with one row per group.
 }
 \description{
 Evaluates whether the data meet the three requirements necessary for
@@ -64,25 +54,30 @@ meaningful response surface analysis (RSA) results: (1) adequate variance
 in both actor and partner scores, (2) sufficient representation of
 over-estimators and under-estimators (at least \code{min_pct}\\% in each
 category), and (3) a statistically significant R-squared from the
-polynomial regression. Results are reported for the overall sample and,
+polynomial mixed model. Results are reported for the overall sample and,
 optionally, separately for each level of a moderator variable.
 }
 \details{
-Participants are classified into three categories based on the difference
-between actor and partner scores:
+Participants are classified into three categories based on the standardized
+difference between actor and partner scores, matching the convention in
+\code{RSA::summary.RSA} (Schönbrodt et al., 2018). Both variables are
+first standardized to a common pooled mean and SD, then the difference
+(partner_z - actor_z) is computed:
 \describe{
-\item{Over-estimator}{Actor score > Partner score by more than
-\code{congruence_threshold}.}
-\item{Under-estimator}{Actor score < Partner score by more than
-\code{congruence_threshold}.}
-\item{Congruent}{|Actor - Partner| <= \code{congruence_threshold}.}
+\item{Over-estimator}{Standardized difference > \code{congruence_threshold}
+(partner exceeds actor).}
+\item{Under-estimator}{Standardized difference < -\code{congruence_threshold}
+(actor exceeds partner).}
+\item{Congruent}{|standardized difference| <= \code{congruence_threshold}.}
 }
 
-The R-squared and its significance are derived from an OLS polynomial
-regression of the outcome on the five RSA terms (actor, partner, actor²,
-actor×partner, partner²). This is used as a preliminary check only; final
-inference should come from the mixed model fitted by
-\code{\link{run_dyadic_rsa}}.
+R-squared and its significance are estimated using \code{\link{estimate_Rsq}},
+which fits null and polynomial \code{glmmTMB} models with the same random
+effect structure specified in \code{re_term} and uses a deviance difference
+test. This properly accounts for dyadic non-independence, unlike the OLS
+approach used in \code{RSA::summary.RSA}. R-squared is always estimated on
+the full sample. When a moderator is supplied, bias percentages are reported
+separately per group but R-squared is not re-estimated per group.
 }
 \examples{
 \dontrun{
@@ -91,9 +86,9 @@ check_rsa_requirements(
   outcome    = "RelSat_A",
   actor      = "c_PosEmotion_A",
   partner    = "c_PosEmotion_P",
+  re_term    = "cs(0 + as.factor(ECGender_A) | DyadID)",
   moderator  = "ECGender_A",
-  mod_labels = c("-1" = "Women", "1" = "Men"),
-  min_pct    = 10
+  mod_labels = c("-1" = "Women", "1" = "Men")
 )
 }
 

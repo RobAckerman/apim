@@ -10,12 +10,14 @@ plot_dyadic_rsa(
   partner,
   moderator = NULL,
   mod_values = NULL,
+  type = "interactive",
   xlim = c(-3, 3),
   ylim = c(-3, 3),
-  n = 60,
+  n = NULL,
   xlab = "Actor",
   ylab = "Partner",
-  zlab = "Outcome"
+  zlab = "Outcome",
+  rotation = list(x = -63, y = 32, z = 15)
 )
 }
 \arguments{
@@ -28,22 +30,23 @@ the value passed to \code{\link{run_dyadic_rsa}}.}
 match the value passed to \code{\link{run_dyadic_rsa}}.}
 
 \item{moderator}{Character string or \code{NULL}. Name of the moderator
-variable — must match the value passed to \code{\link{run_dyadic_rsa}}.
-Default \code{NULL}.}
+variable. Default \code{NULL}.}
 
 \item{mod_values}{Named list or \code{NULL}. Moderator values for
-group-specific surfaces, e.g. \code{list(Men = 1, Women = -1)}.
-Must match the value passed to \code{\link{run_dyadic_rsa}}.
-Default \code{NULL}.}
+group-specific surfaces. Default \code{NULL}.}
+
+\item{type}{Character string. Plot type: \code{"interactive"} for plotly
+(default) or \code{"static"} for lattice wireframe.}
 
 \item{xlim}{Numeric vector of length 2. Range of the actor axis.
-Default \code{c(-3, 3)}.}
+Default \code{c(-3, 3)}. Note: the actor axis is displayed reversed
+(high values at front-left) to match \code{RSA::plotRSA} orientation.}
 
 \item{ylim}{Numeric vector of length 2. Range of the partner axis.
 Default \code{c(-3, 3)}.}
 
-\item{n}{Integer. Number of grid points along each axis for surface
-rendering. Default \code{60}.}
+\item{n}{Integer. Number of grid points along each axis.
+Default \code{60} for interactive, \code{21} for static.}
 
 \item{xlab}{Character string. Label for the actor axis.
 Default \code{"Actor"}.}
@@ -53,18 +56,24 @@ Default \code{"Partner"}.}
 
 \item{zlab}{Character string. Label for the outcome axis.
 Default \code{"Outcome"}.}
+
+\item{rotation}{Named list. Rotation angles for static plot.
+Default \code{list(x = -63, y = 32, z = 15)} matching
+\code{RSA::plotRSA}.}
 }
 \value{
-Invisibly returns a named list of \code{plotly} figure objects,
-one per panel. Each figure is also printed to the viewer.
+Invisibly returns a named list of plot objects, one per panel.
 }
 \description{
-Produces interactive 3D response surface plots from the output of
-\code{\link{run_dyadic_rsa}} using \code{plotly}. One panel is produced
-for each surface (overall, and one per group in \code{mod_values}).
-All panels share a common z-axis range for direct visual comparability.
-The line of congruence (where actor = partner) is overlaid on each surface
-as a dashed black line.
+Produces response surface plots from the output of
+\code{\link{run_dyadic_rsa}}. Two plot types are available: an interactive
+3D surface using \code{plotly} (default), and a static black-and-white
+wireframe plot using \code{lattice} matching the style of
+\code{RSA::plotRSA}. One panel is produced per surface (overall, and one
+per group in \code{mod_values}). The actor axis is reversed by default
+to match \code{RSA::plotRSA} orientation. The line of congruence
+(actor = partner) and line of incongruence (actor = -partner) are overlaid
+on each surface.
 }
 \examples{
 \dontrun{
@@ -78,17 +87,24 @@ rsa_out <- run_dyadic_rsa(
   mod_values = list(Men = 1, Women = -1)
 )
 
+# Interactive plotly
 plot_dyadic_rsa(
   rsa_out    = rsa_out,
   actor      = "c_PosEmotion_A",
   partner    = "c_PosEmotion_P",
   moderator  = "ECGender_A",
   mod_values = list(Men = 1, Women = -1),
-  xlim       = c(-3, 3),
-  ylim       = c(-3, 3),
-  xlab       = "Actor positive emotion",
-  ylab       = "Partner positive emotion",
-  zlab       = "Relationship satisfaction"
+  type       = "interactive"
+)
+
+# Static B&W wireframe
+plot_dyadic_rsa(
+  rsa_out    = rsa_out,
+  actor      = "c_PosEmotion_A",
+  partner    = "c_PosEmotion_P",
+  moderator  = "ECGender_A",
+  mod_values = list(Men = 1, Women = -1),
+  type       = "static"
 )
 }
 
