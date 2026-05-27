@@ -15,6 +15,23 @@
 #' and supply the names of the dummy-coded variables for the two dyad members
 #' via \code{person_1} and \code{person_2}.
 #'
+#' For \code{gls} models with \code{indistinguishable = FALSE}, the model
+#' must be in the two-intercept form (e.g.
+#' \code{RelSat_A ~ 0 + man + woman + man:c_Amity_A + woman:c_Amity_A}).
+#' If your model uses the interaction approach, use \code{switch_to_twoint()}
+#' first. The \code{person_1} argument is assumed to correspond to the
+#' reference level of \code{varIdent} (the level with ratio = 1.0, determined
+#' by the first value of the grouping variable encountered in the data) and
+#' \code{person_2} to the non-reference level. A note is printed at runtime
+#' showing which factor levels correspond to \code{person_1} and
+#' \code{person_2} so you can verify the mapping is correct.
+#'
+#' For \code{glmmTMB} models with \code{indistinguishable = FALSE}, the
+#' random effects term must use explicit dummy-coded variables
+#' (e.g. \code{cs(0 + man + woman | DyadID)}) rather than \code{as.factor()}.
+#' The names supplied to \code{person_1} and \code{person_2} must match the
+#' dummy variable names exactly.
+#'
 #' If researchers use other software to estimate the models, they must provide
 #' all individual quantities needed to estimate and test R-squared. When
 #' supplying these values, researchers must ensure that the deviances are from
@@ -59,13 +76,15 @@
 #' @param resvar_full_p2 Numeric. REML residual variance for person 2 from
 #'   the full model. Only required for the distinguishable case when not
 #'   supplying model objects.
-#' @param person_1 Character. Name of the dummy-coded variable for the first
-#'   dyad member in the dataset (e.g. \code{"man"}). Used as a display label
-#'   when supplying raw values, and as a column name when supplying model
-#'   objects for the distinguishable case. Defaults to \code{"Person 1"}.
-#' @param person_2 Character. Name of the dummy-coded variable for the second
-#'   dyad member in the dataset (e.g. \code{"woman"}). Defaults to
-#'   \code{"Person 2"}.
+#' @param person_1 Character. Display label and variable name for the first
+#'   dyad member. For \code{glmmTMB} models, must match the dummy-coded
+#'   variable name in the random effects term exactly (e.g. \code{"man"}).
+#'   For \code{gls} models, assumed to correspond to the reference level of
+#'   \code{varIdent} (ratio = 1.0). Defaults to \code{"Person 1"}.
+#' @param person_2 Character. Display label and variable name for the second
+#'   dyad member. For \code{glmmTMB} models, must match the dummy-coded
+#'   variable name exactly. For \code{gls} models, assumed to correspond to
+#'   the non-reference level of \code{varIdent}. Defaults to \code{"Person 2"}.
 #'
 #' @return Invisibly returns a \code{data.frame} with columns \code{person},
 #'   \code{R2}, \code{chi2}, \code{df}, and \code{p}. For the
@@ -82,7 +101,16 @@
 #'              p_null = 3, p_full = 5,
 #'              resvar_null = 0.722, resvar_full = 0.562)
 #'
-#' # Distinguishable APIM — supply model object
+#' # Distinguishable APIM — gls, must be in two-intercept form
+#' m_twoint <- switch_to_twoint(m_interact,
+#'                              disting_variable = "ECGender_A",
+#'                              disting_level_1  = "man",
+#'                              disting_level_2  = "woman")
+#' estimate_Rsq(m_twoint,
+#'              indistinguishable = FALSE,
+#'              person_1 = "man", person_2 = "woman")
+#'
+#' # Distinguishable APIM — glmmTMB, RE must use explicit dummy codes
 #' estimate_Rsq(model_full = fulldismodel_REML,
 #'              indistinguishable = FALSE,
 #'              person_1 = "man", person_2 = "woman")
@@ -96,7 +124,7 @@
 #'              resvar_full_p1 = 0.389, resvar_full_p2 = 0.473,
 #'              person_1 = "man", person_2 = "woman")
 #' }
-#' @importFrom stats pchisq formula update coef
+#' @importFrom stats pchisq formula update coef terms
 #' @export
 estimate_Rsq <- function(model_full        = NULL,
                          indistinguishable = TRUE,
@@ -125,8 +153,7 @@ estimate_Rsq <- function(model_full        = NULL,
   }
 
   # ---------------------------------------------------------------------------
-  # Helper: extract RE string using bracket-matching — robust to RE terms
-  # appearing anywhere in the formula (e.g. middle, as switch_to_twoint does)
+  # Helper: extract RE string using bracket-matching
   # ---------------------------------------------------------------------------
   .get_re_string <- function(object) {
     formula_string <- gsub("\\s+", " ",
@@ -145,7 +172,6 @@ estimate_Rsq <- function(model_full        = NULL,
         depth <- depth - 1
       }
     }
-
     depth <- 0
     right <- pipe_pos
     for (i in pipe_pos:nchar(rhs)) {
@@ -155,7 +181,6 @@ estimate_Rsq <- function(model_full        = NULL,
         depth <- depth - 1
       }
     }
-
     func_start <- left
     for (i in (left - 1):1) {
       if (grepl("[a-zA-Z0-9_\\.]", chars[i])) {
@@ -164,13 +189,11 @@ estimate_Rsq <- function(model_full        = NULL,
         break
       }
     }
-
     trimws(substr(rhs, func_start, right))
   }
 
   # ---------------------------------------------------------------------------
-  # Helper: push original data to .GlobalEnv so update() / glmmTMB() can
-  # find it regardless of the calling environment
+  # Helper: push original data to .GlobalEnv
   # ---------------------------------------------------------------------------
   .push_data <- function(model) {
     original_data <- tryCatch(
@@ -183,7 +206,7 @@ estimate_Rsq <- function(model_full        = NULL,
   }
 
   # ---------------------------------------------------------------------------
-  # Helper: silence stderr messages from glmmTMB (e.g. rank-deficient columns)
+  # Helper: silence stderr messages from glmmTMB
   # ---------------------------------------------------------------------------
   quietly <- function(expr) {
     tmp <- textConnection("msg_sink", open = "w", local = TRUE)
@@ -341,14 +364,69 @@ estimate_Rsq <- function(model_full        = NULL,
       outcome_var    <- as.character(fixeff_formula[2])
       extracted_vars <- all.vars(fixeff_formula)
 
-      omit_vars_person    <- c(":", "_A$", "_P$", outcome_var)
-      vars_person         <- extracted_vars[!grepl(
-        paste(omit_vars_person, collapse = "|"), extracted_vars)]
-      person_1_col        <- vars_person[[1]]
-      person_2_col        <- vars_person[[2]]
-      omit_vars_predictor <- c(":", person_1_col, person_2_col, outcome_var)
-      vars_predictor      <- extracted_vars[!grepl(
-        paste(omit_vars_predictor, collapse = "|"), extracted_vars)]
+      # -- check model is in two-intercept form --------------------------------
+      if (!person_1 %in% extracted_vars || !person_2 %in% extracted_vars) {
+        stop(
+          "For the distinguishable gls case, estimate_Rsq() requires the ",
+          "model to be in two-intercept form\n",
+          "  (e.g. RelSat_A ~ 0 + man + woman + man:c_Amity_A + ",
+          "woman:c_Amity_A + ...).\n",
+          "  '", person_1, "' and/or '", person_2, "' were not found among ",
+          "the model's fixed-effect terms.",
+          call. = FALSE
+        )
+      }
+
+      # -- note about varIdent reference level ---------------------------------
+      model_data <- tryCatch(
+        eval(model_full$call$data, envir = .GlobalEnv),
+        error = function(e) model_full$data
+      )
+      var_struct_coefs <- coef(model_full$modelStruct$varStruct,
+                               uncons = FALSE)
+      weights_var <- tryCatch({
+        wf <- as.character(model_full$call$weights[[2]])
+        gsub("[[:space:]~]", "", sub(".*\\|", "", wf[2]))
+      }, error = function(e) "distinguishing variable")
+
+      all_levels <- tryCatch(
+        as.character(sort(unique(model_data[[weights_var]]))),
+        error = function(e) NULL
+      )
+      ref_level    <- if (!is.null(all_levels))
+        all_levels[!all_levels %in% names(var_struct_coefs)] else "unknown"
+      nonref_level <- names(var_struct_coefs)
+      first_val    <- tryCatch(
+        as.character(model_data[[weights_var]][1]),
+        error = function(e) "unknown"
+      )
+
+      message(
+        "Note: For gls models, person_1 ('", person_1, "') is assumed to ",
+        "correspond to the reference level of varIdent\n",
+        "  (", weights_var, " = ", paste(ref_level, collapse = "/"), ") and ",
+        "person_2 ('", person_2, "') is assumed to correspond to the ",
+        "non-reference level\n",
+        "  (", weights_var, " = ", paste(nonref_level, collapse = "/"), ").\n",
+        "  The reference level is the first value of ", weights_var,
+        " encountered in the data (row 1 = ", first_val, ").\n",
+        "  Verify this matches your model specification before interpreting ",
+        "the person-specific R\u00b2 values."
+      )
+
+      # -- use person_1 and person_2 directly ----------------------------------
+      person_1_col <- person_1
+      person_2_col <- person_2
+
+      # extract predictors using term labels — robust to any variable naming
+      all_terms       <- attr(terms(fixeff_formula), "term.labels")
+      vars_with_colon <- all_terms[grepl(":", all_terms)]
+      vars_predictor  <- unique(sapply(vars_with_colon, function(term) {
+        parts      <- strsplit(term, ":")[[1]]
+        non_person <- parts[!parts %in% c(person_1_col, person_2_col)]
+        if (length(non_person) == 1) non_person else NA_character_
+      }))
+      vars_predictor <- vars_predictor[!is.na(vars_predictor)]
 
       model_null <- suppressWarnings(update(model_full,
                                             paste(outcome_var, "~ 0 +", person_1_col, "+", person_2_col)))
@@ -394,9 +472,6 @@ estimate_Rsq <- function(model_full        = NULL,
       p2_dfR2     <- p_full_val - p_p1_val
       p1_pvalueR2 <- pchisq(q = p1_chiR2, df = p1_dfR2, lower.tail = FALSE)
       p2_pvalueR2 <- pchisq(q = p2_chiR2, df = p2_dfR2, lower.tail = FALSE)
-
-      person_1 <- person_1_col
-      person_2 <- person_2_col
     }
 
     # --- glmmTMB object supplied ---
@@ -417,6 +492,7 @@ estimate_Rsq <- function(model_full        = NULL,
         eval(model_full$call$dispformula)
       } else { ~1 }
 
+      # use person_1 and person_2 directly
       person_1_col <- person_1
       person_2_col <- person_2
 
@@ -424,6 +500,7 @@ estimate_Rsq <- function(model_full        = NULL,
       vars_predictor      <- extracted_vars[!grepl(
         paste(omit_vars_predictor, collapse = "|"), extracted_vars)]
 
+      # build formulas explicitly
       f_null <- as.formula(paste(
         outcome_var, "~ 0 +", person_1_col, "+", person_2_col, "+", re_string
       ))
@@ -441,6 +518,7 @@ estimate_Rsq <- function(model_full        = NULL,
         "+", paste(paste0(person_2_col, ":", vars_predictor), collapse = " + ")
       ))
 
+      # fit all models directly
       model_null_REML <- quietly(glmmTMB::glmmTMB(
         f_null, dispformula = dispformula, REML = TRUE,
         data = .estimate_rsq_data_tmp))
@@ -464,6 +542,24 @@ estimate_Rsq <- function(model_full        = NULL,
       p_null_val <- length(model_null_ML$obj$par)
       p_p1_val   <- length(model_p1_ML$obj$par)
       p_p2_val   <- length(model_p2_ML$obj$par)
+
+      # check person names exist in RE matrix
+      re_names <- rownames(
+        summary(model_null_REML)$varcor$cond[[grouping_variable]]
+      )
+      if (!person_1_col %in% re_names || !person_2_col %in% re_names) {
+        stop(
+          "Could not find '", person_1_col, "' and/or '", person_2_col,
+          "' in the random effects variance-covariance matrix.\n",
+          "  Found: ", paste(re_names, collapse = ", "), "\n",
+          "  For the distinguishable case, the model must use explicit ",
+          "dummy-coded variables in the random effects term\n",
+          "  (e.g. cs(0 + man + woman | DyadID)) rather than as.factor().\n",
+          "  The names supplied to person_1 and person_2 must match the ",
+          "dummy variable names exactly.",
+          call. = FALSE
+        )
+      }
 
       p1_model_null_sigma2 <- summary(model_null_REML)$varcor$cond[[grouping_variable]][person_1_col, person_1_col]
       p2_model_null_sigma2 <- summary(model_null_REML)$varcor$cond[[grouping_variable]][person_2_col, person_2_col]

@@ -80,14 +80,16 @@ supplying model objects.}
 the full model. Only required for the distinguishable case when not
 supplying model objects.}
 
-\item{person_1}{Character. Name of the dummy-coded variable for the first
-dyad member in the dataset (e.g. \code{"man"}). Used as a display label
-when supplying raw values, and as a column name when supplying model
-objects for the distinguishable case. Defaults to \code{"Person 1"}.}
+\item{person_1}{Character. Display label and variable name for the first
+dyad member. For \code{glmmTMB} models, must match the dummy-coded
+variable name in the random effects term exactly (e.g. \code{"man"}).
+For \code{gls} models, assumed to correspond to the reference level of
+\code{varIdent} (ratio = 1.0). Defaults to \code{"Person 1"}.}
 
-\item{person_2}{Character. Name of the dummy-coded variable for the second
-dyad member in the dataset (e.g. \code{"woman"}). Defaults to
-\code{"Person 2"}.}
+\item{person_2}{Character. Display label and variable name for the second
+dyad member. For \code{glmmTMB} models, must match the dummy-coded
+variable name exactly. For \code{gls} models, assumed to correspond to
+the non-reference level of \code{varIdent}. Defaults to \code{"Person 2"}.}
 }
 \value{
 Invisibly returns a \code{data.frame} with columns \code{person},
@@ -110,6 +112,23 @@ is distinguishable, researchers must specify \code{indistinguishable = FALSE}
 and supply the names of the dummy-coded variables for the two dyad members
 via \code{person_1} and \code{person_2}.
 
+For \code{gls} models with \code{indistinguishable = FALSE}, the model
+must be in the two-intercept form (e.g.
+\code{RelSat_A ~ 0 + man + woman + man:c_Amity_A + woman:c_Amity_A}).
+If your model uses the interaction approach, use \code{switch_to_twoint()}
+first. The \code{person_1} argument is assumed to correspond to the
+reference level of \code{varIdent} (the level with ratio = 1.0, determined
+by the first value of the grouping variable encountered in the data) and
+\code{person_2} to the non-reference level. A note is printed at runtime
+showing which factor levels correspond to \code{person_1} and
+\code{person_2} so you can verify the mapping is correct.
+
+For \code{glmmTMB} models with \code{indistinguishable = FALSE}, the
+random effects term must use explicit dummy-coded variables
+(e.g. \code{cs(0 + man + woman | DyadID)}) rather than \code{as.factor()}.
+The names supplied to \code{person_1} and \code{person_2} must match the
+dummy variable names exactly.
+
 If researchers use other software to estimate the models, they must provide
 all individual quantities needed to estimate and test R-squared. When
 supplying these values, researchers must ensure that the deviances are from
@@ -126,7 +145,16 @@ estimate_Rsq(deviance_null = 1472.455, deviance_full = 1341.497,
              p_null = 3, p_full = 5,
              resvar_null = 0.722, resvar_full = 0.562)
 
-# Distinguishable APIM — supply model object
+# Distinguishable APIM — gls, must be in two-intercept form
+m_twoint <- switch_to_twoint(m_interact,
+                             disting_variable = "ECGender_A",
+                             disting_level_1  = "man",
+                             disting_level_2  = "woman")
+estimate_Rsq(m_twoint,
+             indistinguishable = FALSE,
+             person_1 = "man", person_2 = "woman")
+
+# Distinguishable APIM — glmmTMB, RE must use explicit dummy codes
 estimate_Rsq(model_full = fulldismodel_REML,
              indistinguishable = FALSE,
              person_1 = "man", person_2 = "woman")

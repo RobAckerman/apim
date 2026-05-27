@@ -1,7 +1,3 @@
-# =============================================================================
-# EXPORTED: check_rsa_requirements
-# =============================================================================
-
 #' Check Preliminary Requirements for Dyadic Response Surface Analysis
 #'
 #' @description
@@ -94,6 +90,20 @@ check_rsa_requirements <- function(
     min_pct               = 10
 ) {
 
+  # ---------------------------------------------------------------------------
+  # Helper: silence console output and stderr (e.g. from estimate_Rsq and
+  # glmmTMB messages)
+  # ---------------------------------------------------------------------------
+  quietly <- function(expr) {
+    tmp <- textConnection("msg_sink", open = "w", local = TRUE)
+    sink(tmp, type = "message")
+    on.exit({ sink(type = "message"); close(tmp) })
+    invisible(suppressWarnings(suppressMessages(
+      utils::capture.output(result <- expr, type = "output")
+    )))
+    result
+  }
+
   # -- build polynomial term names -------------------------------------------
   a2_nm <- paste0(actor,   "2")
   p2_nm <- paste0(partner, "2")
@@ -135,7 +145,6 @@ check_rsa_requirements <- function(
     add = TRUE
   )
 
-  null_formula <- as.formula(paste(outcome, "~ 1 +", re_term))
   poly_formula <- as.formula(paste(
     outcome, "~", actor, "+", partner, "+",
     a2_nm, "+", ap_nm, "+", p2_nm, "+", re_term
@@ -149,29 +158,17 @@ check_rsa_requirements <- function(
   )
   model_poly$call$data <- quote(.rsa_req_data_tmp)
 
-  r2_result <- estimate_Rsq(
-    model_full        = model_poly,
-    indistinguishable = TRUE
-  )
-
-  # parse R2 and p-value from returned text string
-  r2_text <- as.character(r2_result)
-  r2_val  <- as.numeric(
-    regmatches(r2_text,
-               regexpr("(?<=R\u00b2 = )[.0-9]+", r2_text, perl = TRUE))
-  )
-  p_val   <- as.numeric(
-    regmatches(r2_text,
-               regexpr("(?<=p = )[.0-9eE+-]+", r2_text, perl = TRUE))
-  )
-
-  # fallback if unicode matching fails
-  if (length(r2_val) == 0 || is.na(r2_val)) {
-    r2_val <- as.numeric(
-      regmatches(r2_text,
-                 regexpr("(?<=R2 = )[.0-9]+", r2_text, perl = TRUE))
+  # call estimate_Rsq and capture the invisible data frame return value
+  r2_out <- quietly(
+    estimate_Rsq(
+      model_full        = model_poly,
+      indistinguishable = TRUE
     )
-  }
+  )
+
+  # r2_out is the data frame returned invisibly by estimate_Rsq
+  r2_val <- r2_out$R2
+  p_val  <- r2_out$p
 
   r2_sig <- !is.na(p_val) && p_val < .05
   stars  <- ifelse(is.na(p_val),   "",
@@ -182,7 +179,7 @@ check_rsa_requirements <- function(
 
   # -- step 2: build output rows ---------------------------------------------
   make_row <- function(df, group_label) {
-    b       <- get_bias(df)
+    b          <- get_bias(df)
     meets_bias <- b$pct_over >= min_pct & b$pct_under >= min_pct
     meets_all  <- meets_bias & r2_sig
     data.frame(
